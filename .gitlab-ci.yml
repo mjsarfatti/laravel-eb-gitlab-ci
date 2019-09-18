@@ -1,0 +1,69 @@
+stages:
+  - test
+  - deploy
+
+# Variables
+variables:
+  MYSQL_ROOT_PASSWORD: root
+  MYSQL_USER: homestead
+  MYSQL_PASSWORD: secret
+  MYSQL_DATABASE: [CHANGE ME]
+  DB_HOST: mysql
+  STAGING_EB_ENVIRONMENT: [CHANGE ME]
+  PRODUCTION_EB_ENVIRONMENT: [CHANGE ME]
+
+# Speed up builds
+cache:
+  key: $CI_COMMIT_REF_NAME
+  paths:
+    - vendor
+    - public
+
+test:
+  stage: test
+  except:
+    variables:
+      - $CI_COMMIT_MESSAGE =~ /\[skip[ _-]tests?\]/i
+  services:
+    - mysql:5.7
+  image: mjsarfatti/gitlab-ci-pipeline-php-aws:latest
+  script:
+    - composer install --prefer-dist --no-ansi --no-interaction --no-progress
+    - php artisan key:generate
+    - php artisan migrate:refresh --seed
+    - ./vendor/phpunit/phpunit/phpunit -v --coverage-text --colors=never --stderr
+  artifacts:
+    paths:
+      - ./storage/logs # for debugging
+    expire_in: 7 days
+    when: always
+
+deploy to staging:
+  stage: deploy
+  environment: staging
+  image: mjsarfatti/gitlab-ci-pipeline-php-aws:latest
+  before_script:
+    - mkdir ~/.aws/
+    - touch ~/.aws/credentials
+    - printf "[eb-cli]\naws_access_key_id = %s\naws_secret_access_key = %s\n" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" >> ~/.aws/credentials
+  script:
+    - git checkout staging
+    - eb deploy $STAGING_EB_ENVIRONMENT
+  only:
+    - staging
+  when: on_success
+
+deploy to production:
+  stage: deploy
+  environment: production
+  image: mjsarfatti/gitlab-ci-pipeline-php-aws:latest
+  before_script:
+    - mkdir ~/.aws/
+    - touch ~/.aws/credentials
+    - printf "[eb-cli]\naws_access_key_id = %s\naws_secret_access_key = %s\n" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" >> ~/.aws/credentials
+  script:
+    - git checkout master
+    - eb deploy $PRODUCTION_EB_ENVIRONMENT
+  only:
+    - master
+  when: manual
